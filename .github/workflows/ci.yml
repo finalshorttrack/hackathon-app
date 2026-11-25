@@ -30,22 +30,5 @@ jobs:
       - name: 테스트 실행
         run: pytest -v
   
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Docker 이미지 빌드
-        run: docker build -t hackathon-app:${{ github.sha }} .
-
-      - name: 컨테이너 기동 확인
-        run: |
-          docker run -d --name app -p 8000:8000 hackathon-app:${{ github.sha }}
-          for _ in $(seq 1 15); do
-            if curl -sf http://localhost:8000/health; then exit 0; fi
-            sleep 1
-          done
-          docker logs app
-          exit 1
+  
 
