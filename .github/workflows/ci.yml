@@ -1,3 +1,4 @@
+# hackathon-app CI: 테스트 → Docker 빌드 → (main 일 때만) GHCR push
 name: CI
 
 on:
@@ -7,12 +8,23 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 기본은 읽기만 허용한다. 쓰기가 필요한 job 에서만 늘린다
 permissions:
   contents: read
 
+# 같은 브랜치에 새 push 가 오면 앞선 실행을 취소한다
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    name: test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v7
@@ -20,7 +32,7 @@ jobs:
       - name: Python 설치
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: requirements*.txt
 
@@ -28,7 +40,15 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: 테스트 실행
-        run: pytest -v
+        run: pytest -v --junitxml=report.xml
+
+      - name: 테스트 결과 보관
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-report-${{ matrix.python-version }}
+          path: report.xml
+          retention-days: 7
 
   build:
     needs: test
@@ -47,5 +67,42 @@ jobs:
             sleep 1
           done
           docker logs app
-          exit 1  
-  
+          exit 1
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 태그 만들기
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: GHCR 로그인
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: 빌드하고 push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
