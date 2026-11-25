@@ -8,7 +8,7 @@ client = TestClient(app)
 def test_root():
     res = client.get("/")
     assert res.status_code == 200
-    assert res.json() == {"message": "hello hackathon"}
+    assert res.json() == {"message": "hello skala"}
 
 
 def test_health():
